@@ -1,0 +1,30 @@
+name: napari-filament-finder
+display_name: Filament Finder
+# use 'hidden' to remove plugin from napari hub search results
+visibility: public
+# see https://napari.org/stable/plugins/technical_references/manifest.html#fields for valid categories
+# categories: []
+contributions:
+  commands:
+    - id: napari-filament-finder.make_sample_data
+      python_name: napari_filament_finder._sample_data:make_sample_data
+      title: Load sample data from Filament Finder
+    - id: napari-filament-finder.find_filaments
+      python_name: napari_filament_finder:find_filaments
+      title: Find filaments
+    - id: napari-filament-finder.find_closest_filament
+      python_name: napari_filament_finder:find_closest_filament
+      title: Find closest filaments
+  sample_data:
+    - command: napari-filament-finder.make_sample_data
+      display_name: Filament Finder
+      key: unique_id.1
+  widgets:
+    - command: napari-filament-finder.find_filaments
+      display_name: Find filaments
+    - command: napari-filament-finder.find_closest_filament
+      display_name: Find closest filament
+  menus:
+    napari/layers/track:
+      - command: napari-filament-finder.find_closest_filament
+      - command: napari-filament-finder.find_filaments

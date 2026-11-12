@@ -53,6 +53,8 @@ def test_widget_assigns_ids_and_creates_contours(make_napari_viewer):
     contours = viewer.layers[f'{layer.name} contours']
     assert len(contours.data) == 2
     assert set(contours.features['rlnFilamentID']) == {1, 2}
+    # both filaments run 50 units along x; the contour is a straight line
+    assert np.allclose(contours.features['length'], 50, atol=1e-6)
     # Re-running replaces the contours layer instead of duplicating it
     w(viewer, layer, cone_angle=15, max_distance=15, tolerance=0)
     assert sum(lyr.name.endswith('contours') for lyr in viewer.layers) == 1
@@ -258,3 +260,9 @@ def test_join_tolerance_is_separate_from_keep_tolerance():
     )
     assert loose[-1] == 0  # joins with the larger join tolerance
     assert (loose[:-1] == 0).all()  # keep tolerance unchanged
+
+
+def test_contour_length_uses_scale():
+    contour = np.array([[0.0, 0, 0], [3, 4, 0], [3, 4, 12]])
+    assert utils.contour_length(contour) == 5 + 12
+    assert utils.contour_length(contour, scale=[2, 2, 1]) == 10 + 12

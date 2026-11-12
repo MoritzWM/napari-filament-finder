@@ -84,7 +84,8 @@ def find_filaments(
     Every vector gets a filament ID (`rlnFilamentID`), numbered from 1;
     vectors that are not part of any filament get ID 0 and a transparent
     color (or white, see `show_unassigned`). A Shapes layer with one spline
-    contour per filament is created.
+    contour per filament is created; its features table holds the filament ID
+    and the contour `length` (in world units, i.e. including the layer scale).
 
     cone_angle: a neighbour must lie within this angle of the vector's axis.
     max_distance: how far to look for neighbours. The button "Set distances
@@ -146,7 +147,15 @@ def find_filaments(
         edge_width=_CONTOUR_EDGE_WIDTH,
         edge_color=_filament_colors(np.array(contour_ids)),
         face_color='transparent',
-        features=pd.DataFrame({'rlnFilamentID': contour_ids}),
+        features=pd.DataFrame(
+            {
+                'rlnFilamentID': contour_ids,
+                'length': [
+                    utils.contour_length(contours[i], vectors_layer.scale)
+                    for i in contour_ids
+                ],
+            }
+        ),
         scale=vectors_layer.scale,
         translate=vectors_layer.translate,
         name=name,

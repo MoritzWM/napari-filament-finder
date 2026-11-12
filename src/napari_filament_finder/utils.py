@@ -554,3 +554,14 @@ def refine_filament_ids(
         )
         ids = np.where(ids < 0, rejoined, ids)
     return ids, contours
+
+
+def contour_length(contour: np.ndarray, scale=None) -> float:
+    """
+    Length of a contour polyline. With `scale` (per-axis, e.g. a layer's
+    scale) the length is measured in world units rather than data units.
+    """
+    contour = np.asarray(contour, dtype=float)
+    if scale is not None:
+        contour = contour * np.asarray(scale, dtype=float)
+    return float(np.linalg.norm(np.diff(contour, axis=0), axis=1).sum())

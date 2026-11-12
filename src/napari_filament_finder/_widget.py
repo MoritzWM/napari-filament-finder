@@ -14,19 +14,27 @@ if TYPE_CHECKING:
 @magic_factory(
     cone_angle={'min': 0.1, 'max': 180},
     max_distance={'min': 0.1, 'max': 1e9},
+    perpendicular_tolerance={'min': 0, 'max': 1e9},
     min_point_count={'min': 1, 'max': 1e6},
 )
 def find_filaments(
     vectors_layer: 'napari.layers.Vectors',  # pyright: ignore[reportAttributeAccessIssue]
     cone_angle: float = 15,
     max_distance: float = 100,
+    perpendicular_tolerance: float = 0,
     min_point_count: int = 2,
 ):
+    """Group vectors into filaments.
+
+    A neighbour is accepted if it lies within the cone, or within
+    `perpendicular_tolerance` of the vector's axis (0 = disabled).
+    """
     ids = utils.assign_filament_ids(
         vectors_layer.data,
         cone_angle=cone_angle,
         max_distance=max_distance,
         min_point_count=min_point_count,
+        perpendicular_tolerance=perpendicular_tolerance,
     )
     # Assign a new DataFrame (not in-place) so napari emits the features event
     # and the layer controls' feature comboboxes refresh.

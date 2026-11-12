@@ -5,7 +5,10 @@ from scipy.spatial.distance import pdist, squareform
 
 
 def find_points_in_cone(
-    vector_data: np.ndarray, cone_angle: float, max_distance: float
+    vector_data: np.ndarray,
+    cone_angle: float,
+    max_distance: float,
+    perpendicular_tolerance: float = 0.0,
 ):
     """
     Find all points that fall within a cone projected from each point.
@@ -15,6 +18,10 @@ def find_points_in_cone(
     - vecs: (N, 3) array of direction vectors (should be normalized)
     - cone_angle: half-angle of the cone in degrees
     - max_distance: maximum distance along the cone axis
+    - perpendicular_tolerance: a point is also accepted if it lies within this
+      distance of the axis line (in front of or behind the point), even when
+      outside the cone angle. 0 disables this. Helps at short range, where a
+      small lateral offset corresponds to a large angle.
 
     Returns:
     - cone_points: (N,) array where each element is a list of indices within the cone
@@ -46,13 +53,25 @@ def find_points_in_cone(
         )  # avoid division by zero
 
         # Find points within cone: angle < cone_angle AND distance < max_distance AND dot product > 0
+        # Distance of each point from the axis line through `point`
+        perpendicular = np.sqrt(
+            np.maximum(distances**2 - dot_products_pos**2, 0.0)
+        )
+        near_axis = perpendicular <= perpendicular_tolerance
+
         in_cone_pos = (
-            (np.arccos(np.clip(cos_angles, -1, 1)) < cone_angle_rad)
+            (
+                (np.arccos(np.clip(cos_angles, -1, 1)) < cone_angle_rad)
+                | near_axis
+            )
             & (distances < max_distance)
             & (dot_products_pos > 0)
         )
         in_cone_neg = (
-            (np.arccos(np.clip(cos_angles_neg, -1, 1)) < cone_angle_rad)
+            (
+                (np.arccos(np.clip(cos_angles_neg, -1, 1)) < cone_angle_rad)
+                | near_axis
+            )
             & (distances < max_distance)
             & (dot_products_neg > 0)
         )
@@ -66,11 +85,15 @@ def assign_filament_ids(
     cone_angle: float,
     max_distance: float,
     min_point_count: int,
+    perpendicular_tolerance: float = 0.0,
 ):
     if vector_data.ndim != 3 or vector_data.shape[1:] != (2, 3):
         raise ValueError('vector_data needs to be of shape (N, 2, 3)')
     cone_points = find_points_in_cone(
-        vector_data, cone_angle=cone_angle, max_distance=max_distance
+        vector_data,
+        cone_angle=cone_angle,
+        max_distance=max_distance,
+        perpendicular_tolerance=perpendicular_tolerance,
     )
 
     filaments: list[set[int]] = []

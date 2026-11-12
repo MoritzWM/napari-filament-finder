@@ -11,26 +11,20 @@ contributions:
       title: Load sample data from Filament Finder
     - id: napari-filament-finder.find_filaments
       python_name: napari_filament_finder:find_filaments
-      title: Find filaments
+      title: Find filaments and fit contours
     - id: napari-filament-finder.find_closest_filament
       python_name: napari_filament_finder:find_closest_filament
       title: Find closest filaments
-    - id: napari-filament-finder.fit_filament_contours
-      python_name: napari_filament_finder:fit_filament_contours
-      title: Fit filament contours
   sample_data:
     - command: napari-filament-finder.make_sample_data
       display_name: Filament Finder
       key: unique_id.1
   widgets:
     - command: napari-filament-finder.find_filaments
-      display_name: Find filaments
+      display_name: Find filaments and fit contours
     - command: napari-filament-finder.find_closest_filament
       display_name: Find closest filament
-    - command: napari-filament-finder.fit_filament_contours
-      display_name: Fit filament contours
   menus:
     napari/layers/track:
       - command: napari-filament-finder.find_closest_filament
       - command: napari-filament-finder.find_filaments
-      - command: napari-filament-finder.fit_filament_contours

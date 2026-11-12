@@ -4,15 +4,10 @@ except ImportError:
     __version__ = 'unknown'
 
 from ._sample_data import make_sample_data
-from ._widget import (
-    find_closest_filament,
-    find_filaments,
-    fit_filament_contours,
-)
+from ._widget import find_closest_filament, find_filaments
 
 __all__ = (
     'make_sample_data',
     "find_filaments",
     "find_closest_filament",
-    "fit_filament_contours",
 )

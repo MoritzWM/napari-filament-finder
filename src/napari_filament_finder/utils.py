@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.ma as ma
+from scipy.interpolate import splev, splprep
 from scipy.spatial.distance import pdist, squareform
 
 
@@ -151,3 +152,60 @@ def find_word_index(word: str, strings: list[str]) -> int | None:
         if word_lower in s.lower():
             return i
     return None
+
+
+def order_points_along_filament(coords: np.ndarray) -> np.ndarray:
+    """Return indices that order (N, 3) points along their principal axis."""
+    centered = coords - coords.mean(axis=0)
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    return np.argsort(centered @ vt[0])
+
+
+def fit_filament_contour(
+    coords: np.ndarray, smoothing: float = 0.0, samples_per_point: int = 5
+) -> np.ndarray:
+    """
+    Fit a smooth 3D contour (polyline of spline samples) through the points
+    of one filament.
+
+    Parameters:
+    - coords: (N, 3) array of points belonging to a single filament
+    - smoothing: spline smoothing, in units of squared distance per point
+      (0 = interpolate through all points)
+    - samples_per_point: number of contour vertices generated per input point
+
+    Returns:
+    - (M, 3) array of contour vertices, ordered along the filament
+    """
+    coords = np.asarray(coords, dtype=float)
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        raise ValueError('coords needs to be of shape (N, 3)')
+    ordered = coords[order_points_along_filament(coords)]
+    # Drop consecutive duplicates, which splprep cannot handle
+    keep = np.r_[True, np.any(np.diff(ordered, axis=0) != 0, axis=1)]
+    ordered = ordered[keep]
+    n = len(ordered)
+    if n < 2:
+        return ordered
+    degree = min(3, n - 1)
+    tck, _ = splprep(ordered.T, k=degree, s=smoothing * n)
+    u = np.linspace(0, 1, max(2, n * samples_per_point))
+    return np.stack(splev(u, tck), axis=1)
+
+
+def fit_filament_contours(
+    coords: np.ndarray,
+    filament_ids: np.ndarray,
+    smoothing: float = 0.0,
+    samples_per_point: int = 5,
+) -> dict[int, np.ndarray]:
+    """Fit a contour per filament ID; IDs < 0 (unassigned) are skipped."""
+    if len(filament_ids) != len(coords):
+        raise ValueError('filament_ids must have the same length as coords')
+    return {
+        int(fid): fit_filament_contour(
+            coords[filament_ids == fid], smoothing, samples_per_point
+        )
+        for fid in np.unique(filament_ids)
+        if fid >= 0
+    }

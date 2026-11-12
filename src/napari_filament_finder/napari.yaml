@@ -15,6 +15,9 @@ contributions:
     - id: napari-filament-finder.find_closest_filament
       python_name: napari_filament_finder:find_closest_filament
       title: Find closest filaments
+    - id: napari-filament-finder.fit_filament_contours
+      python_name: napari_filament_finder:fit_filament_contours
+      title: Fit filament contours
   sample_data:
     - command: napari-filament-finder.make_sample_data
       display_name: Filament Finder
@@ -24,7 +27,10 @@ contributions:
       display_name: Find filaments
     - command: napari-filament-finder.find_closest_filament
       display_name: Find closest filament
+    - command: napari-filament-finder.fit_filament_contours
+      display_name: Fit filament contours
   menus:
     napari/layers/track:
       - command: napari-filament-finder.find_closest_filament
       - command: napari-filament-finder.find_filaments
+      - command: napari-filament-finder.fit_filament_contours

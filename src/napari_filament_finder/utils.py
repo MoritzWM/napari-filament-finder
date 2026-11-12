@@ -1,6 +1,7 @@
 import numpy as np
 import numpy.ma as ma
 from scipy.interpolate import splev, splprep
+from scipy.spatial import cKDTree
 from scipy.spatial.distance import pdist, squareform
 
 
@@ -184,8 +185,54 @@ def order_points_along_filament(coords: np.ndarray) -> np.ndarray:
     return np.argsort(centered @ vt[0])
 
 
+def _ordered_unique(coords: np.ndarray) -> np.ndarray:
+    """Order points along the filament and drop consecutive duplicates."""
+    ordered = coords[order_points_along_filament(coords)]
+    keep = np.r_[True, np.any(np.diff(ordered, axis=0) != 0, axis=1)]
+    return ordered[keep]
+
+
+def _fit_spline(ordered: np.ndarray, smoothing: float, n_samples: int):
+    n = len(ordered)
+    tck, _ = splprep(ordered.T, k=min(3, n - 1), s=smoothing * n)
+    return np.stack(splev(np.linspace(0, 1, n_samples), tck), axis=1)
+
+
+def on_track_mask(
+    ordered: np.ndarray, max_deviation: float, min_points: int = 4
+) -> np.ndarray:
+    """
+    Flag points to use in the fit: iteratively exclude the point that lies
+    furthest from the curve through all *other* points (leave-one-out), as
+    long as that distance exceeds `max_deviation`. Excluded points are only
+    ignored for fitting; the input is never modified. The two end points of
+    the filament are always kept.
+
+    Returns a boolean mask over `ordered` (True = use for fitting).
+    """
+    keep = np.ones(len(ordered), dtype=bool)
+    while keep.sum() > min_points:
+        idx = np.flatnonzero(keep)
+        pts = ordered[idx]
+        # Endpoints are never judged: the curve through the other points does
+        # not extend to them, so their deviation is undefined.
+        deviation = np.zeros(len(pts))
+        for j in range(1, len(pts) - 1):
+            others = np.delete(pts, j, axis=0)
+            curve = _fit_spline(others, 0.0, len(others) * 20)
+            deviation[j] = cKDTree(curve).query(pts[j])[0]
+        worst = int(np.argmax(deviation))
+        if deviation[worst] <= max_deviation:
+            break
+        keep[idx[worst]] = False
+    return keep
+
+
 def fit_filament_contour(
-    coords: np.ndarray, smoothing: float = 0.0, samples_per_point: int = 5
+    coords: np.ndarray,
+    smoothing: float = 0.0,
+    samples_per_point: int = 5,
+    max_deviation: float = 0.0,
 ) -> np.ndarray:
     """
     Fit a smooth 3D contour (polyline of spline samples) through the points
@@ -196,6 +243,8 @@ def fit_filament_contour(
     - smoothing: spline smoothing, in units of squared distance per point
       (0 = interpolate through all points)
     - samples_per_point: number of contour vertices generated per input point
+    - max_deviation: points further than this from the curve through the
+      other points are ignored for the fit (0 = use all points)
 
     Returns:
     - (M, 3) array of contour vertices, ordered along the filament
@@ -203,17 +252,13 @@ def fit_filament_contour(
     coords = np.asarray(coords, dtype=float)
     if coords.ndim != 2 or coords.shape[1] != 3:
         raise ValueError('coords needs to be of shape (N, 3)')
-    ordered = coords[order_points_along_filament(coords)]
-    # Drop consecutive duplicates, which splprep cannot handle
-    keep = np.r_[True, np.any(np.diff(ordered, axis=0) != 0, axis=1)]
-    ordered = ordered[keep]
+    ordered = _ordered_unique(coords)
+    if max_deviation > 0 and len(ordered) > 4:
+        ordered = ordered[on_track_mask(ordered, max_deviation)]
     n = len(ordered)
     if n < 2:
         return ordered
-    degree = min(3, n - 1)
-    tck, _ = splprep(ordered.T, k=degree, s=smoothing * n)
-    u = np.linspace(0, 1, max(2, n * samples_per_point))
-    return np.stack(splev(u, tck), axis=1)
+    return _fit_spline(ordered, smoothing, max(2, n * samples_per_point))
 
 
 def fit_filament_contours(
@@ -221,13 +266,17 @@ def fit_filament_contours(
     filament_ids: np.ndarray,
     smoothing: float = 0.0,
     samples_per_point: int = 5,
+    max_deviation: float = 0.0,
 ) -> dict[int, np.ndarray]:
     """Fit a contour per filament ID; IDs < 0 (unassigned) are skipped."""
     if len(filament_ids) != len(coords):
         raise ValueError('filament_ids must have the same length as coords')
     return {
         int(fid): fit_filament_contour(
-            coords[filament_ids == fid], smoothing, samples_per_point
+            coords[filament_ids == fid],
+            smoothing,
+            samples_per_point,
+            max_deviation,
         )
         for fid in np.unique(filament_ids)
         if fid >= 0

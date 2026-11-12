@@ -147,6 +147,7 @@ def fit_filament_contours_init(widget):
     widget_init=fit_filament_contours_init,
     filament_id_column={'choices': [], 'widget_type': 'ComboBox'},
     smoothing={'min': 0, 'max': 1e9},
+    max_deviation={'min': 0, 'max': 1e9},
     samples_per_point={'min': 1, 'max': 1000},
     edge_width={'min': 0.1, 'max': 1e6},
 )
@@ -155,10 +156,15 @@ def fit_filament_contours(
     vectors_layer: 'napari.layers.Vectors',  # pyright: ignore[reportAttributeAccessIssue]
     filament_id_column: str,
     smoothing: float = 0,
+    max_deviation: float = 0,
     samples_per_point: int = 5,
     edge_width: float = 2,
 ):
-    """Fit a spline contour (Shapes layer) through each identified filament."""
+    """Fit a spline contour (Shapes layer) through each identified filament.
+
+    Points further than `max_deviation` from the curve through the other points are
+    ignored for the fit (0 = use all points).
+    """
     features = vectors_layer.features
     if features is None or filament_id_column not in features.columns:
         return
@@ -169,6 +175,7 @@ def fit_filament_contours(
         coords,
         filament_ids,
         smoothing=smoothing,
+        max_deviation=max_deviation,
         samples_per_point=samples_per_point,
     )
     # Contours need at least two vertices to form a path

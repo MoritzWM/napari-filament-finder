@@ -8,6 +8,7 @@ from napari.utils.colormaps.vendored import cm
 from napari.utils.notifications import show_warning
 
 from . import utils
+from .tracing import trace_filaments
 
 if TYPE_CHECKING:
     import napari
@@ -27,7 +28,7 @@ def _filament_colors(ids: np.ndarray, show_unassigned: bool = False) -> np.ndarr
 
 
 def find_filaments_init(widget):
-    """Add a button that derives `max_distance` and `tolerance` from the
+    """Add a button that derives `max_gap` and `tolerance` from the
     layer's point spacing; fold away the advanced settings until requested."""
 
     def set_from_data():
@@ -40,13 +41,13 @@ def find_filaments_init(widget):
             show_warning('Could not estimate the spacing of the vectors.')
             return
         # Four times the mean spacing bridges a few missing points
-        widget.max_distance.value = float(f'{4 * spacing:.3g}')
-        # A third of the spacing: above typical picking scatter, yet far
-        # below the distance between neighbouring filaments
-        widget.tolerance.value = float(f'{spacing / 3:.3g}')
+        widget.max_gap.value = float(f'{4 * spacing:.3g}')
+        # The spacing: above typical picking scatter, yet below the
+        # distance between neighbouring filaments
+        widget.tolerance.value = float(f'{spacing:.3g}')
 
     def on_advanced_changed(show):
-        widget.join_tolerance.visible = show
+        widget.max_bridge.visible = show
         widget.smoothing.visible = show
 
     button = PushButton(text='Estimate from data')
@@ -60,69 +61,58 @@ def find_filaments_init(widget):
 
 @magic_factory(
     widget_init=find_filaments_init,
-    cone_angle={'min': 0.1, 'max': 180},
-    max_distance={'min': 0.1, 'max': 1e9},
+    max_angle={'min': 0.1, 'max': 90},
+    max_gap={'min': 0.1, 'max': 1e9},
     tolerance={'min': 0, 'max': 1e9},
     min_point_count={'min': 1, 'max': 1e6},
-    join_tolerance={'min': 0, 'max': 1e9},
+    max_bridge={'min': 0, 'max': 1e9},
     smoothing={'min': 0, 'max': 1e9},
 )
 def find_filaments(
     viewer: 'napari.Viewer',  # pyright: ignore[reportAttributeAccessIssue]
     vectors_layer: 'napari.layers.Vectors',  # pyright: ignore[reportAttributeAccessIssue]
-    cone_angle: float = 15,
-    max_distance: float = 100,
+    max_angle: float = 30,
+    max_gap: float = 100,
     tolerance: float = 1,
-    min_point_count: int = 2,
+    min_point_count: int = 3,
     show_unassigned: bool = False,
     advanced: bool = False,
-    join_tolerance: float = 0,
+    max_bridge: float = 0,
     smoothing: float = 1,
 ):
-    """Group vectors into filaments and fit a contour through each one.
+    """Trace filaments through the vectors and fit a contour to each.
 
     Every vector gets a filament ID (`rlnFilamentID`), numbered from 1;
     vectors that are not part of any filament get ID 0 and a transparent
     color (or white, see `show_unassigned`). A Shapes layer with one spline
     contour per filament is created; its features table holds the filament ID
     and the contour `length` (in world units, i.e. including the layer scale).
+    Filaments never branch. Vector directions are treated as bidirectional.
 
-    cone_angle: a neighbour must lie within this angle of the vector's axis.
-    max_distance: how far to look for neighbours. The button "Set distances
-        from data" sets it to four times the mean spacing of the vectors.
-    tolerance: maximum distance of a vector from its filament, in the layer's
-        units (the button sets it to a third of the mean spacing). A neighbour within this distance of the vector's axis is
-        accepted regardless of the angle, and vectors further than this from
-        the fitted contour are ignored (ID 0). 0 disables both, and the
-        contour-based reassignment.
+    max_angle: largest angular deviation (degrees) between a vector and the
+        line to its neighbour, between neighbouring vectors, and at gaps.
+    max_gap: largest distance between neighbouring vectors of a filament. The
+        button "Estimate from data" sets it to four times the mean spacing.
+    tolerance: position scatter (layer units) that is forgiven when judging
+        angles; the button sets it to the mean spacing.
     min_point_count: smallest number of vectors forming a filament.
     show_unassigned: show unassigned vectors (ID 0) in white instead of
         hiding them (transparent).
-    join_tolerance: (advanced) distance from a contour within which a vector
-        is assigned to it, also if the first grouping missed it. 0 = same as
-        tolerance.
+    max_bridge: (advanced) largest gap bridged between filament pieces.
+        0 = four times max_gap.
     smoothing: (advanced) contour smoothing; 0 passes through every point.
     """
-    data = vectors_layer.data
-    ids = utils.assign_filament_ids(
-        data,
-        cone_angle=cone_angle,
-        max_distance=max_distance,
-        min_point_count=min_point_count,
-        perpendicular_tolerance=tolerance,
-    )
-    # Fit contours; with a tolerance, also reassign every vector to the
-    # contour it lies on, and ignore (ID 0) vectors that are too far off track.
-    ids, contours = utils.refine_filament_ids(
-        data,
-        ids,
-        cone_angle=cone_angle,
+    ids, _, contour_list = trace_filaments(
+        vectors_layer.data,
+        max_gap=max_gap,
+        max_angle=max_angle,
+        max_bridge=max_bridge or None,
         tolerance=tolerance,
-        min_point_count=min_point_count,
+        min_points=min_point_count,
         smoothing=smoothing,
         samples_per_point=_CONTOUR_SAMPLES_PER_POINT,
-        join_tolerance=join_tolerance if join_tolerance > 0 else tolerance,
     )
+    contours = dict(enumerate(contour_list))
     # Internally unassigned is -1 and filaments are 0-based; in the output ID 0
     # means unassigned and filaments are numbered from 1.
     ids = ids + 1

@@ -57,18 +57,33 @@ def test_widget_ignores_off_track_point(make_napari_viewer):
     assert (np.delete(ids[:6], 3) == ids[0]).all() and ids[0] >= 1
 
 
-def test_column_choices_refresh(make_napari_viewer):
-    from napari_filament_finder import find_closest_filament
+def test_closest_filament_is_written_to_contours_and_vectors(make_napari_viewer):
+    from napari_filament_finder import find_filaments
 
     viewer = make_napari_viewer()
-    w = find_closest_filament()
-    viewer.window.add_dock_widget(w)
-    layer = viewer.add_vectors(np.ones((3, 2, 3)))
-    assert w.vectors_layer.value is layer
-    assert 'rlnFilamentID' not in w.filament_id_column.choices
-    layer.features = layer.features.assign(rlnFilamentID=[0, 0, 0])
-    assert 'rlnFilamentID' in w.filament_id_column.choices
-    assert w.filament_id_column.value == 'rlnFilamentID'
+    layer = viewer.add_vectors(_two_filaments_and_noise())
+    find_filaments()(viewer, layer, max_gap=15, tolerance=0)
+    contours = viewer.layers[f'{layer.name} contours']
+    # filaments 1 and 2 are 200 apart; each is the other's neighbor
+    features = contours.features
+    ids = features['rlnFilamentID'].to_numpy()
+    closest = features['rlnClosestFilamentID'].to_numpy()
+    assert (closest == 3 - ids).all()
+    assert np.allclose(features['rlnClosestFilamentDistance'], 200)
+    # vectors get the distance only
+    vfeatures = layer.features
+    assert 'rlnClosestFilamentPointIndex' not in vfeatures.columns
+    assert 'rlnClosestFilamentID' not in vfeatures.columns
+    assert np.allclose(vfeatures['rlnClosestFilamentPointDistance'][:12], 200)
+    # the unassigned noise vector at (500, 500, 500) is far from everything
+    assert vfeatures['rlnClosestFilamentPointDistance'][12] > 200
+
+
+def test_closest_other_filament_without_candidates():
+    idx, dist = utils.closest_other_filament(
+        np.zeros((2, 3)), np.array([1, 1]), np.zeros((3, 3)), np.array([1, 1, 1])
+    )
+    assert (idx == -1).all() and np.isnan(dist).all()
 
 
 def test_widget_sets_distances_only_on_button_press(make_napari_viewer):

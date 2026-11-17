@@ -87,6 +87,13 @@ def find_filaments(
     color (or white, see `show_unassigned`). A Shapes layer with one spline
     contour per filament is created; its features table holds the filament ID
     and the contour `length` (in world units, i.e. including the layer scale).
+    The closest other filament is found as well: a vector with a different ID
+    (unassigned vectors count as different from every filament). Each contour
+    gets one neighbor, the closest such vector from any point of the contour:
+    its filament ID (`rlnClosestFilamentID`) and the distance
+    (`rlnClosestFilamentDistance`). Each vector gets the distance to its
+    closest such vector (`rlnClosestFilamentPointDistance`). Distances are in
+    world units.
     Filaments never branch. Vector directions are treated as bidirectional.
 
     max_angle: largest angular deviation (degrees) between a vector and the
@@ -122,6 +129,19 @@ def find_filaments(
     vectors_layer.features = vectors_layer.features.assign(rlnFilamentID=ids)
     vectors_layer.edge_color = _filament_colors(ids, show_unassigned)
 
+    # Closest other filament (a vector with a different ID, unassigned
+    # included), in world units. Contours share the vectors' coordinates.
+    vector_coords = vectors_layer.data[:, 0, :] * vectors_layer.scale
+    _, vector_distances = utils.closest_other_filament(
+        points=vector_coords,
+        point_ids=ids,
+        vector_coords=vector_coords,
+        vector_ids=ids,
+    )
+    vectors_layer.features = vectors_layer.features.assign(
+        rlnClosestFilamentPointDistance=vector_distances
+    )
+
     # Contours need at least two vertices to form a path
     contours = {k: v for k, v in contours.items() if len(v) >= 2}
     name = f'{vectors_layer.name} contours'
@@ -131,6 +151,24 @@ def find_filaments(
     if not contours:
         return
     contour_ids = list(contours)
+    # One neighbor per contour: the closest foreign vector over all its points
+    closest_ids = []
+    closest_distances = []
+    for i in contour_ids:
+        points = contours[i] * vectors_layer.scale
+        indices, distances = utils.closest_other_filament(
+            points=points,
+            point_ids=np.full(len(points), i),
+            vector_coords=vector_coords,
+            vector_ids=ids,
+        )
+        if np.isnan(distances).all():
+            closest_ids.append(-1)
+            closest_distances.append(np.nan)
+            continue
+        best = np.nanargmin(distances)
+        closest_ids.append(int(ids[indices[best]]))
+        closest_distances.append(float(distances[best]))
     viewer.add_shapes(
         [contours[i] for i in contour_ids],
         shape_type='path',
@@ -144,105 +182,11 @@ def find_filaments(
                     utils.contour_length(contours[i], vectors_layer.scale)
                     for i in contour_ids
                 ],
+                'rlnClosestFilamentID': closest_ids,
+                'rlnClosestFilamentDistance': closest_distances,
             }
         ),
         scale=vectors_layer.scale,
         translate=vectors_layer.translate,
         name=name,
-    )
-
-
-def find_closest_filament_init(widget):
-    """Keep the filament ID column choices in sync with the vectors layer.
-
-    Refreshes when the selected layer changes, when its features change
-    (e.g. after running "Find filaments"), and when the widget is shown.
-    """
-    state = {'layer': None}
-
-    def refresh(*_):
-        layer = widget.vectors_layer.value
-        features = None if layer is None else layer.features
-        columns = [] if features is None else list(features.columns)
-        widget.filament_id_column.choices = columns
-        if not columns:
-            return
-        current = widget.filament_id_column.value
-        if current in columns:
-            return
-        index = utils.find_word_index('filament', columns)
-        widget.filament_id_column.value = columns[index or 0]
-
-    def on_layer_changed(layer):
-        old = state['layer']
-        if old is not None:
-            old.events.features.disconnect(refresh)
-        state['layer'] = layer
-        if layer is not None:
-            layer.events.features.connect(refresh)
-        refresh()
-
-    def on_choices_reset(*_):
-        # The layer combobox is populated (and repopulated whenever layers are
-        # added/removed) without necessarily emitting `changed`.
-        layer = widget.vectors_layer.value
-        if layer is not state['layer']:
-            on_layer_changed(layer)
-        else:
-            refresh()
-
-    widget.vectors_layer.changed.connect(on_layer_changed)
-    original_reset = widget.vectors_layer.reset_choices
-
-    def reset_choices(*args):
-        original_reset(*args)
-        on_choices_reset()
-
-    widget.vectors_layer.reset_choices = reset_choices
-    widget.called.connect(on_choices_reset)
-    widget.native_parent_changed.connect(on_choices_reset)
-
-    import napari
-
-    viewer = napari.current_viewer()
-    if viewer is not None:
-        # Connected after magicgui's own layer-list handlers, so the layer
-        # combobox is already up to date when we refresh.
-        for event in (viewer.layers.events.inserted, viewer.layers.events.removed):
-            event.connect(on_choices_reset)
-    widget.native.showEvent = _chain_show_event(widget.native, refresh)
-    on_layer_changed(widget.vectors_layer.value)
-
-
-def _chain_show_event(native, callback):
-    original = native.showEvent
-
-    def show_event(event):
-        callback()
-        original(event)
-
-    return show_event
-
-
-@magic_factory(
-    widget_init=find_closest_filament_init,
-    filament_id_column={'choices': [], 'widget_type': 'ComboBox'},
-)
-def find_closest_filament(
-    vectors_layer: 'napari.layers.Vectors',  # pyright: ignore[reportAttributeAccessIssue]
-    filament_id_column: str,
-):
-    features = vectors_layer.features
-    if features is None:
-        return
-    if filament_id_column not in features.columns:
-        return
-    filament_ids = features[filament_id_column].to_numpy()
-    indices, distances = utils.assign_closest_neighbor(
-        vectors_or_coords=vectors_layer.data, filament_ids=filament_ids
-    )
-    vectors_layer.features = features.assign(
-        rlnClosestFilamentID=filament_ids[indices],
-        rlnClosestFilamentPointIndex=indices,
-        rlnClosestFilamentPointDistance=distances,
     )

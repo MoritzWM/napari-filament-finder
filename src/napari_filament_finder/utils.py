@@ -12,51 +12,38 @@ def estimate_spacing(vector_data: np.ndarray) -> float:
     return float(cKDTree(points).query(points, k=2)[0][:, 1].mean())
 
 
-def assign_closest_neighbor(
-    vectors_or_coords: np.ndarray,
-    filament_ids: np.ndarray,
+def closest_other_filament(
+    points: np.ndarray,
+    point_ids: np.ndarray,
+    vector_coords: np.ndarray,
+    vector_ids: np.ndarray,
 ):
-    if vectors_or_coords.ndim == 3 and vectors_or_coords.shape[1:] == (2, 3):
-        coords = vectors_or_coords[:, 0, :]
-    elif vectors_or_coords.ndim == 2 and vectors_or_coords.shape[1] == 3:
-        coords = vectors_or_coords[:, :]
-    else:
-        raise ValueError(
-            f'Vectors/coords: invalid shape, must be (N, 2, 3) or (N, 3) but is {vectors_or_coords.shape}'
-        )
-    if len(filament_ids) != len(coords):
-        raise ValueError(
-            f'Filament IDs must be of the same length as coords ({len(filament_ids)}) != {len(coords)}'
-        )
-    closest_neighbor_indices = np.zeros(len(coords), dtype=int)
-    closest_neighbor_distances = np.zeros(len(coords), dtype=float)
+    """
+    For each point, find the closest vector that belongs to a *different*
+    filament (ID 0, i.e. unassigned, counts as different from every filament).
 
-    distance_matrix = squareform(pdist(coords))
-    for filament_id in np.unique(filament_ids):
-        filament_idxs = np.where(filament_ids == filament_id)[0]
-        distance_matrix_mask = np.zeros_like(distance_matrix)
-        distance_matrix_mask[filament_ids == filament_id, :] = 1
-        distance_matrix_mask[:, filament_ids != filament_id] = 1
-        distance_matrix_masked = ma.masked_array(
-            distance_matrix, distance_matrix_mask
-        )
-        min_distances = distance_matrix_masked.min(axis=0)
-        min_distance_idx = distance_matrix_masked.argmin(axis=0)[
-            np.nonzero(~min_distances.mask)
-        ]
-        closest_neighbor_indices[filament_idxs] = min_distance_idx
-        closest_neighbor_distances[filament_idxs] = min_distances.compressed()
-
-    return closest_neighbor_indices, closest_neighbor_distances
-
-
-def find_word_index(word: str, strings: list[str]) -> int | None:
-    """Find the index of the first string containing the word (case-insensitive)."""
-    word_lower = word.lower()
-    for i, s in enumerate(strings):
-        if word_lower in s.lower():
-            return i
-    return None
+    Returns `(indices, distances)`: the index into `vector_coords` and the
+    distance. Points without any candidate get index -1 and distance NaN.
+    """
+    points = np.asarray(points, dtype=float)
+    point_ids = np.asarray(point_ids)
+    vector_coords = np.asarray(vector_coords, dtype=float)
+    vector_ids = np.asarray(vector_ids)
+    if len(point_ids) != len(points):
+        raise ValueError('point_ids must have one entry per point')
+    if len(vector_ids) != len(vector_coords):
+        raise ValueError('vector_ids must have one entry per vector')
+    indices = np.full(len(points), -1, dtype=int)
+    distances = np.full(len(points), np.nan, dtype=float)
+    for filament_id in np.unique(point_ids):
+        candidates = np.where(vector_ids != filament_id)[0]
+        if len(candidates) == 0:
+            continue
+        selected = point_ids == filament_id
+        dist, nearest = cKDTree(vector_coords[candidates]).query(points[selected])
+        indices[selected] = candidates[nearest]
+        distances[selected] = dist
+    return indices, distances
 
 
 def contour_length(contour: np.ndarray, scale=None) -> float:
